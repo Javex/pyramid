@@ -5,6 +5,8 @@ from pyramid.compat import (
     bytes_,
     )
 
+from hashlib import md5
+
 class TestCallbackAuthenticationPolicyDebugging(unittest.TestCase):
     def setUp(self):
         from pyramid.interfaces import IDebugLogger
@@ -426,7 +428,14 @@ class TestAutkTktAuthenticationPolicy(unittest.TestCase):
         result = policy.remember(request, 'fred', a=1, b=2)
         self.assertEqual(policy.cookie.kw, {'a':1, 'b':2})
         self.assertEqual(result, [])
-        
+
+    def test_remember_hashalg_module(self):
+        request = DummyRequest({})
+        from hashlib import sha512
+        policy = self._makeOne(None, None, hashalg=sha512)
+        result = policy.remember(request, 'fred')
+        self.assertEqual(result, [])
+  
     def test_forget(self):
         request = DummyRequest({})
         policy = self._makeOne(None, None)
@@ -932,6 +941,19 @@ class TestAuthTktCookieHelper(unittest.TestCase):
                           tokens=('foo bar',))
         self.assertRaises(ValueError, helper.remember, request, 'other',
                           tokens=('1bar',))
+        
+    def test_remember_hashalg_module(self):
+        import base64
+        from hashlib import sha512
+        helper = self._makeOne('secret', hashalg=sha512)
+        request = self._makeRequest()
+        result = helper.remember(request, b'userid')
+        values = self._parseHeaders(result)
+        self.assertEqual(len(result), 3)
+        val = self._cookieValue(values[0])
+        self.assertEqual(val['userid'],
+                         bytes_(base64.b64encode(b'userid').strip()))
+        self.assertEqual(val['user_data'], 'userid_type:b64str')
 
     def test_forget(self):
         helper = self._makeOne('secret')
@@ -970,6 +992,12 @@ class TestAuthTicket(unittest.TestCase):
         ticket = self._makeOne('secret', 'userid', '0.0.0.0', time=10)
         result = ticket.digest()
         self.assertEqual(result, '126fd6224912187ee9ffa80e0b81420c')
+        
+    def test_digest_sha256(self):
+        from hashlib import sha256
+        ticket = self._makeOne('secret', 'userid', '0.0.0.0', time=10, hashalg=sha256)
+        result = ticket.digest()
+        self.assertEqual(result, '7016bd1d9a6796b72cbac2949030d033f426395b20ac885c683e20174bf019cb')
 
     def test_cookie_value(self):
         ticket = self._makeOne('secret', 'userid', '0.0.0.0', time=10,
@@ -977,6 +1005,15 @@ class TestAuthTicket(unittest.TestCase):
         result = ticket.cookie_value()
         self.assertEqual(result,
                          '66f9cc3e423dc57c91df696cf3d1f0d80000000auserid!a,b!')
+        
+    def test_cookie_value_sha256(self):
+        from hashlib import sha256
+        ticket = self._makeOne('secret', 'userid', '0.0.0.0', time=10,
+                               tokens=('a', 'b'), hashalg=sha256)
+        result = ticket.cookie_value()
+        self.assertEqual(result,
+                         '0916ac6e955a7c92a25f6580d6aec36e5efa4866c86448243ebce1764840c84e0000000auserid!a,b!')
+        
 
 class TestBadTicket(unittest.TestCase):
     def _makeOne(self, msg, expected=None):
@@ -989,13 +1026,13 @@ class TestBadTicket(unittest.TestCase):
         self.assertTrue(isinstance(exc, Exception))
 
 class Test_parse_ticket(unittest.TestCase):
-    def _callFUT(self, secret, ticket, ip):
+    def _callFUT(self, secret, ticket, ip, hashalg=md5):
         from pyramid.authentication import parse_ticket
-        return parse_ticket(secret, ticket, ip)
+        return parse_ticket(secret, ticket, ip, hashalg)
 
-    def _assertRaisesBadTicket(self, secret, ticket, ip):
+    def _assertRaisesBadTicket(self, secret, ticket, ip, hashalg=md5):
         from pyramid.authentication import BadTicket
-        self.assertRaises(BadTicket,self._callFUT, secret, ticket, ip)
+        self.assertRaises(BadTicket,self._callFUT, secret, ticket, ip, hashalg)
 
     def test_bad_timestamp(self):
         ticket = 'x' * 64
@@ -1013,6 +1050,22 @@ class Test_parse_ticket(unittest.TestCase):
         ticket = '66f9cc3e423dc57c91df696cf3d1f0d80000000auserid!a,b!'
         result = self._callFUT('secret', ticket, '0.0.0.0')
         self.assertEqual(result, (10, 'userid', ['a', 'b'], ''))
+        
+    def test_correct_with_user_data_sha256(self):
+        ticket = '0916ac6e955a7c92a25f6580d6aec36e5efa4866c86448243ebce1764840c84e0000000auserid!a,b!'
+        from hashlib import sha256
+        result = self._callFUT('secret', ticket, '0.0.0.0', sha256)
+        self.assertEqual(result, (10, 'userid', ['a', 'b'], ''))
+        
+    def test_correct_but_missing_hashalg(self):
+        ticket = '0916ac6e955a7c92a25f6580d6aec36e5efa4866c86448243ebce1764840c84e0000000auserid!a,b!'
+        self._assertRaisesBadTicket('secret', ticket, '0.0.0.0') 
+        
+    def test_correct_but_wrong_hashalg(self):
+        ticket = '0916ac6e955a7c92a25f6580d6aec36e5efa4866c86448243ebce1764840c84e0000000auserid!a,b!'
+        from hashlib import sha512
+        self._assertRaisesBadTicket('secret', ticket, '0.0.0.0', sha512) 
+        
 
 class TestSessionAuthenticationPolicy(unittest.TestCase):
     def _getTargetClass(self):
@@ -1156,17 +1209,18 @@ class DummyAuthTktModule(object):
         self.tokens = tokens
         self.user_data = user_data
         self.parse_raise = parse_raise
-        def parse_ticket(secret, value, remote_addr):
+        def parse_ticket(secret, value, remote_addr, hashalg):
             self.secret = secret
             self.value = value
             self.remote_addr = remote_addr
+            self.hashalg = hashalg
             if self.parse_raise:
                 raise self.BadTicket()
             return self.timestamp, self.userid, self.tokens, self.user_data
         self.parse_ticket = parse_ticket
         
         class AuthTicket(object):
-            def __init__(self, secret, userid, remote_addr, **kw):
+            def __init__(self, secret, userid, remote_addr, hashalg=False, **kw):
                 self.secret = secret
                 self.userid = userid
                 self.remote_addr = remote_addr

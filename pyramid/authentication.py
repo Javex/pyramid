@@ -353,6 +353,13 @@ class AuthTktAuthenticationPolicy(CallbackAuthenticationPolicy):
         Pyramid debug logger about the results of various authentication
         steps.  The output from debugging is useful for reporting to maillist
         or IRC channels when asking for support.
+        
+    ``hashalg``
+        Default: ``False``. Use a different hash algorithm than the default
+        (``hashlib.md5``). You have to pass a callable that implements the
+        hashlib interface. To increase application security it is recommended
+        to pass ``hashlib.sha256`` or higher as a hashalg. MD5 is preserved 
+        for backwards compatiblity.
 
     Objects of this class implement the interface described by
     :class:`pyramid.interfaces.IAuthenticationPolicy`.
@@ -370,6 +377,7 @@ class AuthTktAuthenticationPolicy(CallbackAuthenticationPolicy):
                  http_only=False,
                  wild_domain=True,
                  debug=False,
+                 hashalg=md5,
                  ):
         self.cookie = AuthTktCookieHelper(
             secret,
@@ -382,6 +390,7 @@ class AuthTktAuthenticationPolicy(CallbackAuthenticationPolicy):
             http_only=http_only,
             path=path,
             wild_domain=wild_domain,
+            hashalg=hashalg,
             )
         self.callback = callback
         self.debug = debug
@@ -427,7 +436,7 @@ class AuthTicket(object):
     """
 
     def __init__(self, secret, userid, ip, tokens=(), user_data='',
-                 time=None, cookie_name='auth_tkt', secure=False):
+                 time=None, cookie_name='auth_tkt', secure=False, hashalg=md5):
         self.secret = secret
         self.userid = userid
         self.ip = ip
@@ -439,11 +448,12 @@ class AuthTicket(object):
             self.time = time
         self.cookie_name = cookie_name
         self.secure = secure
+        self.hashalg=hashalg
 
     def digest(self):
         return calculate_digest(
             self.ip, self.time, self.secret, self.userid, self.tokens,
-            self.user_data)
+            self.user_data, self.hashalg)
 
     def cookie_value(self):
         v = '%s%08x%s!' % (self.digest(), int(self.time),
@@ -465,7 +475,7 @@ class BadTicket(Exception):
         Exception.__init__(self, msg)
 
 # this function licensed under the MIT license (stolen from Paste)
-def parse_ticket(secret, ticket, ip):
+def parse_ticket(secret, ticket, ip, hashalg):
     """
     Parse the ticket, returning (timestamp, userid, tokens, user_data).
 
@@ -473,13 +483,14 @@ def parse_ticket(secret, ticket, ip):
     with an explanation.
     """
     ticket = ticket.strip('"')
-    digest = ticket[:32]
+    digest_length = len(hashalg("").hexdigest())
+    digest = ticket[:digest_length]
     try:
-        timestamp = int(ticket[32:40], 16)
+        timestamp = int(ticket[digest_length:digest_length+8], 16)
     except ValueError as e:
         raise BadTicket('Timestamp is not a hex integer: %s' % e)
     try:
-        userid, data = ticket[40:].split('!', 1)
+        userid, data = ticket[digest_length+8:].split('!', 1)
     except ValueError:
         raise BadTicket('userid is not followed by !')
     userid = url_unquote(userid)
@@ -491,7 +502,7 @@ def parse_ticket(secret, ticket, ip):
         user_data = data
 
     expected = calculate_digest(ip, timestamp, secret,
-                                userid, tokens, user_data)
+                                userid, tokens, user_data, hashalg)
 
     # Avoid timing attacks (see
     # http://seb.dbzteam.org/crypto/python-oauth-timing-hmac.pdf)
@@ -504,15 +515,15 @@ def parse_ticket(secret, ticket, ip):
     return (timestamp, userid, tokens, user_data)
 
 # this function licensed under the MIT license (stolen from Paste)
-def calculate_digest(ip, timestamp, secret, userid, tokens, user_data):
+def calculate_digest(ip, timestamp, secret, userid, tokens, user_data, hashalg):
     secret = bytes_(secret, 'utf-8')
     userid = bytes_(userid, 'utf-8')
     tokens = bytes_(tokens, 'utf-8')
     user_data = bytes_(user_data, 'utf-8')
-    digest0 = md5(
+    digest0 = hashalg(
         encode_ip_timestamp(ip, timestamp) + secret + userid + b'\0'
         + tokens + b'\0' + user_data).hexdigest()
-    digest = md5(bytes_(digest0) + secret).hexdigest()
+    digest = hashalg(bytes_(digest0) + secret).hexdigest()
     return digest
 
 # this function licensed under the MIT license (stolen from Paste)
@@ -556,7 +567,8 @@ class AuthTktCookieHelper(object):
     
     def __init__(self, secret, cookie_name='auth_tkt', secure=False,
                  include_ip=False, timeout=None, reissue_time=None,
-                 max_age=None, http_only=False, path="/", wild_domain=True):
+                 max_age=None, http_only=False, path="/", wild_domain=True,
+                 hashalg=md5):
         self.secret = secret
         self.cookie_name = cookie_name
         self.include_ip = include_ip
@@ -574,6 +586,13 @@ class AuthTktCookieHelper(object):
         if self.http_only:
             static_flags.append('; HttpOnly')
         self.static_flags = "".join(static_flags)
+        
+        #check that hashalg actually is a hashalg
+        if not hasattr(hashalg, '__call__') and hasattr(hashalg(""), 'hexdigest'):
+            raise ValueError("Not a valid hash function, see documentation.")
+        
+        self.hashalg = hashalg
+            
 
     def _get_cookies(self, environ, value, max_age=None):
         if max_age is EXPIRE:
@@ -635,7 +654,7 @@ class AuthTktCookieHelper(object):
         
         try:
             timestamp, userid, tokens, user_data = self.parse_ticket(
-                self.secret, cookie, remote_addr)
+                self.secret, cookie, remote_addr, self.hashalg)
         except self.BadTicket:
             return None
 
@@ -750,7 +769,8 @@ class AuthTktCookieHelper(object):
             tokens=tokens,
             user_data=user_data,
             cookie_name=self.cookie_name,
-            secure=self.secure)
+            secure=self.secure,
+            hashalg=self.hashalg)
 
         cookie_value = ticket.cookie_value()
         return self._get_cookies(environ, cookie_value, max_age)
