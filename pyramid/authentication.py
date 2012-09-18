@@ -483,7 +483,7 @@ def parse_ticket(secret, ticket, ip, hashalg):
     with an explanation.
     """
     ticket = ticket.strip('"')
-    digest_length = len(hashalg("").hexdigest())
+    digest_length = hashalg("").digest_size * 2
     digest = ticket[:digest_length]
     try:
         timestamp = int(ticket[digest_length:digest_length+8], 16)
