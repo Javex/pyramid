@@ -370,6 +370,24 @@ class TestForget(unittest.TestCase):
         _registerAuthenticationPolicy(registry, 'yo')
         result = self._callFUT(request)
         self.assertEqual(result, 'yo')
+        
+class TestGensecret(unittest.TestCase):
+    def setUp(self):
+        cleanUp()
+    
+    def tearDown(self):
+        cleanUp()
+        
+    def _callFUT(self, *arg):
+        from pyramid.security import gensecret
+        return gensecret(*arg)
+        
+    def test_gensecret_correct(self):
+        result = self._callFUT(256)
+        self.assertEqual(len(result), 64)
+        
+    def test_gensecret_no_value(self):
+        self.assertRaises(TypeError, self._callFUT)
 
 class DummyContext:
     def __init__(self, *arg, **kw):

@@ -282,3 +282,10 @@ class ACLAllowed(ACLPermitsResult):
     summary is available as the ``msg`` attribute."""
     boolval = 1
 
+def gensecret(bit_length):
+    """ Generate a random secret string of length ``bit_length``. Returns a 
+    hexadecimal string that can be used for various purposes including
+    generation of a random secret for cookie signing. """
+    from os import urandom
+    from binascii import b2a_hex
+    return b2a_hex(urandom(int(bit_length/8)))

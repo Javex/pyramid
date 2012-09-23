@@ -265,8 +265,9 @@ class AuthTktAuthenticationPolicy(CallbackAuthenticationPolicy):
 
        The secret (a string) used for auth_tkt cookie signing. It is 
        important to generate a strong secret once the application is deployed
-       and actively used. The secret should have the same bit length as the 
-       ``hashalg``'s bit length.
+       and actively used. You can use :meth:`pyramid.security.gensecret`
+       to obtain a strong secret (pass the ``hashalg``'s bit length as the
+       ``bit_length`` to the function).
        Required.
 
     ``callback``
