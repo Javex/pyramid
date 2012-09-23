@@ -103,6 +103,11 @@ For example:
    as :term:`dotted Python name` values, each representing the dotted name
    path to a suitable implementation global defined at Python module scope.
 
+.. note:: On deployment you must change ``'seekrit'`` to a strong value. Also make 
+   sure to choose a more secure algorithm than MD5. Check out the ``secret``
+   and ``hashalg`` parameters of 
+   :class:`~pyramid.authentication.AuthTktAuthenticationPolicy` for details.
+
 The above configuration enables a policy which compares the value of an "auth
 ticket" cookie passed in the request's environment which contains a reference
 to a single :term:`principal` against the principals present in any

@@ -263,7 +263,10 @@ class AuthTktAuthenticationPolicy(CallbackAuthenticationPolicy):
 
     ``secret``
 
-       The secret (a string) used for auth_tkt cookie signing.
+       The secret (a string) used for auth_tkt cookie signing. It is 
+       important to generate a strong secret once the application is deployed
+       and actively used. The secret should have the same bit length as the 
+       ``hashalg``'s bit length.
        Required.
 
     ``callback``
@@ -355,11 +358,11 @@ class AuthTktAuthenticationPolicy(CallbackAuthenticationPolicy):
         or IRC channels when asking for support.
         
     ``hashalg``
-        Default: ``False``. Use a different hash algorithm than the default
-        (``hashlib.md5``). You have to pass a callable that implements the
-        hashlib interface. To increase application security it is recommended
-        to pass ``hashlib.sha256`` or higher as a hashalg. MD5 is preserved 
-        for backwards compatiblity.
+        Default: ``hashlib.md5``. Use a different hash algorithm than the 
+        default. You have to pass a callable that implements the hashlib
+        interface. To increase application security it is recommended to pass 
+        ``hashlib.sha256`` or higher as ``hashalg``. MD5 is preserved for 
+        backwards compatiblity.
 
     Objects of this class implement the interface described by
     :class:`pyramid.interfaces.IAuthenticationPolicy`.
